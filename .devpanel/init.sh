@@ -1,66 +1,96 @@
-#!/bin/bash
-# ---------------------------------------------------------------------
-# Copyright (C) 2021 DevPanel
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License as
-# published by the Free Software Foundation version 3 of the
-# License.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Affero General Public License for more details.
-#
-# For GNU Affero General Public License see <https://www.gnu.org/licenses/>.
-# ----------------------------------------------------------------------
+#!/usr/bin/env bash
+if [ -n "${DEBUG_SCRIPT:-}" ]; then
+  set -x
+fi
+set -eu -o pipefail
+cd $APP_ROOT
 
-#== If webRoot has not been difined, we will set appRoot to webRoot
-if [[ ! -n "$WEB_ROOT" ]]; then
-  export WEB_ROOT=$APP_ROOT
+LOG_FILE="logs/init-$(date +%F-%T).log"
+exec > >(tee $LOG_FILE) 2>&1
+
+TIMEFORMAT=%lR
+# For faster performance, don't audit dependencies automatically.
+export COMPOSER_NO_AUDIT=1
+# For faster performance, don't install dev dependencies.
+export COMPOSER_NO_DEV=1
+
+# Install VSCode Extensions
+if [ -n "${DP_VSCODE_EXTENSIONS:-}" ]; then
+  IFS=','
+  for value in $DP_VSCODE_EXTENSIONS; do
+    time code-server --install-extension $value
+  done
 fi
 
-STATIC_FILES_PATH="$WEB_ROOT/sites/default/files"
-SETTINGS_FILES_PATH="$WEB_ROOT/sites/default/settings.php"
+#== Remove root-owned files.
+echo
+echo Remove root-owned files.
+time sudo rm -rf lost+found
 
 #== Composer install.
-if [[ -f "$APP_ROOT/composer.json" ]]; then
-  cd $APP_ROOT && composer install;
+echo
+if [ -f composer.json ]; then
+  if composer show --locked cweagans/composer-patches ^2 &> /dev/null; then
+    echo 'Update patches.lock.json.'
+    time composer prl
+    echo
+  fi
+else
+  echo 'Generate composer.json.'
+  time source .devpanel/composer_setup.sh
+  echo
 fi
-if [[ -f "$WEB_ROOT/composer.json" ]]; then
-  cd $WEB_ROOT && composer install;
-fi
-#== Install drush locally
-echo "Install drush locally ..."
-composer require --dev drush/drush
+# If update fails, change it to install.
+time composer -n update --no-dev --no-progress
 
-cd $WEB_ROOT && git submodule update --init --recursive
-
-# #Securing file permissions and ownership
-# #https://www.drupal.org/docs/security-in-drupal/securing-file-permissions-and-ownership
-[[ ! -d $STATIC_FILES_PATH ]] && sudo mkdir --mode 775 $STATIC_FILES_PATH || sudo chmod 775 -R $STATIC_FILES_PATH
-sudo chown -R www:www-data $STATIC_FILES_PATH
-
-#== Drush Site Install
-if [[ $(mysql -h$DB_HOST -P$DB_PORT -u$DB_USER -p$DB_PASSWORD $DB_NAME -e "show tables;") == '' ]]; then
-  echo "Site installing ..."
-  cd $APP_ROOT
-  drush si demo_umami --account-name=devpanel --account-pass=devpanel  --site-name="Drupal 11" --db-url=mysql://$DB_USER:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME -y
-  drush cr
+#== Create the private files directory.
+if [ ! -d private ]; then
+  echo
+  echo 'Create the private files directory.'
+  time mkdir private
 fi
 
-#== Setup settings.php file
-sudo cp $APP_ROOT/.devpanel/drupal-settings.php $SETTINGS_FILES_PATH
+#== Create the config sync directory.
+if [ ! -d config/sync ]; then
+  echo
+  echo 'Create the config sync directory.'
+  time mkdir -p config/sync
+fi
 
+#== Generate hash salt.
+if [ ! -f .devpanel/salt.txt ]; then
+  echo
+  echo 'Generate hash salt.'
+  time openssl rand -hex 32 > .devpanel/salt.txt
+fi
 
-#== Generate hash salt
-echo 'Generate hash salt ...'
-DRUPAL_HASH_SALT=$(openssl rand -hex 32);
-sudo sed -i -e "s/^\$settings\['hash_salt'\].*/\$settings\['hash_salt'\] = '$DRUPAL_HASH_SALT';/g" $SETTINGS_FILES_PATH
+#== Install Drupal.
+echo
+if [ -z "$(drush status --field=db-status)" ]; then
+  echo 'Install Drupal.'
+  time drush -n si demo_umami
 
-#== Update permission
-echo 'Update permission ....'
-drush cr
-sudo chown -R www-data:www-data $STATIC_FILES_PATH
-sudo chown www:www-data $SETTINGS_FILES_PATH
-sudo chmod 664 $SETTINGS_FILES_PATH
+  echo
+  echo 'Tell Automatic Updates about patches.'
+  drush -n cset --input-format=yaml package_manager.settings additional_trusted_composer_plugins '["cweagans/composer-patches"]'
+  time drush ev '\Drupal::moduleHandler()->invoke("automatic_updates", "modules_installed", [[], FALSE])'
+else
+  echo 'Update database.'
+  time drush -n updb
+fi
+
+#== Warm up caches.
+echo
+echo 'Run cron.'
+time drush cron
+echo
+echo 'Populate caches.'
+time drush cache:warm &> /dev/null || :
+time .devpanel/warm
+
+#== Finish measuring script time.
+INIT_DURATION=$SECONDS
+INIT_HOURS=$(($INIT_DURATION / 3600))
+INIT_MINUTES=$(($INIT_DURATION % 3600 / 60))
+INIT_SECONDS=$(($INIT_DURATION % 60))
+printf "\nTotal elapsed time: %d:%02d:%02d\n" $INIT_HOURS $INIT_MINUTES $INIT_SECONDS

@@ -15,70 +15,41 @@
 # For GNU Affero General Public License see <https://www.gnu.org/licenses/>.
 # ----------------------------------------------------------------------
 
-#== If webRoot has not been difined, we will set appRoot to webRoot
-if [[ ! -n "$WEB_ROOT" ]]; then
-  export WEB_ROOT=$APP_ROOT
-fi
-
 STATIC_FILES_PATH="$WEB_ROOT/sites/default/files/"
 SETTINGS_FILES_PATH="$WEB_ROOT/sites/default/settings.php"
-OVERWRITE_SETTING="$APP_ROOT/.devpanel/.devpanel-drupal-overwrite-settings"
-
 
 #Create static directory
-if [ ! -d "$STATIC_PATH" ]; then
+if [ ! -d "$STATIC_FILES_PATH" ]; then
   mkdir -p $STATIC_FILES_PATH
 fi
-
 
 #== Composer install.
 if [[ -f "$APP_ROOT/composer.json" ]]; then
   cd $APP_ROOT && composer install
 fi
-if [[ -f "$WEB_ROOT/composer.json" ]]; then
-  cd $WEB_ROOT && composer install
-fi
-
-
-cd $WEB_ROOT && git submodule update --init --recursive
-
-#== Create settings files
-# @link: https://www.drupal.org/docs/7/install/step-3-create-settingsphp-and-the-files-directory
-if [[ ! -f "$SETTINGS_FILES_PATH" ]]; then
-  sudo cp $APP_ROOT/.devpanel/drupal-settings.php $SETTINGS_FILES_PATH
-fi
 
 #== Generate hash salt
 echo 'Generate hash salt ...'
 DRUPAL_HASH_SALT=$(openssl rand -hex 32);
-sudo sed -i -e "s/^\$settings\['hash_salt'\].*/\$settings\['hash_salt'\] = '$DRUPAL_HASH_SALT';/g" $SETTINGS_FILES_PATH
+echo $DRUPAL_HASH_SALT > $APP_ROOT/.devpanel/salt.txt
 
 
-# #Securing file permissions and ownership
-# #https://www.drupal.org/docs/security-in-drupal/securing-file-permissions-and-ownership
+# Securing file permissions and ownership
+# https://www.drupal.org/docs/security-in-drupal/securing-file-permissions-and-ownership
 [[ ! -d $STATIC_FILES_PATH ]] && sudo mkdir --mode 775 $STATIC_FILES_PATH || sudo chmod 775 -R $STATIC_FILES_PATH
 
 #== Extract static files
-if [[ $(drush status --field=bootstrap) == '' ]]; then
+if [ -z "$(drush status --field=db-status)" ]; then
   if [[ -f "$APP_ROOT/.devpanel/dumps/files.tgz" ]]; then
     echo  'Extract static files ...'
     sudo mkdir -p $STATIC_FILES_PATH
     sudo tar xzf "$APP_ROOT/.devpanel/dumps/files.tgz" -C $STATIC_FILES_PATH
+    sudo rm -rf $APP_ROOT/.devpanel/dumps/files.tgz
   fi
 
   #== Import mysql files
-  if [[ -f "$APP_ROOT/.devpanel/dumps/db.sql.tgz" ]]; then
-    echo  'Extract mysql files ...'
-    SQLFILE=$(tar tzf $APP_ROOT/.devpanel/dumps/db.sql.tgz)
-    tar xzf "$APP_ROOT/.devpanel/dumps/db.sql.tgz" -C /tmp/
-    mysql -h$DB_HOST -P$DB_PORT -u$DB_USER -p$DB_PASSWORD $DB_NAME < /tmp/$SQLFILE
-    rm /tmp/$SQLFILE
+  if [[ -f "$APP_ROOT/.devpanel/dumps/db.sql.gz" ]]; then
+    echo  'Import mysql file ...'
+    drush sqlq --file="$APP_ROOT/.devpanel/dumps/db.sql.gz" --file-delete
   fi
 fi
-
-#== Update permission
-echo 'Update permission ....'
-drush cr
-sudo chown -R www-data:www-data $STATIC_FILES_PATH
-sudo chown www:www-data $SETTINGS_FILES_PATH
-sudo chmod 664 $SETTINGS_FILES_PATH
