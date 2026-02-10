@@ -11,9 +11,6 @@ composer create-project --no-install ${PROJECT:=drupal/recommended-project}
 cp -r ${PROJECT#*/}/* ./
 rm -rf ${PROJECT#*/} LICENSE* README* patches.lock.json
 
-# Programmatically fix Composer 2.2 allow-plugins to avoid errors.
-composer config --no-plugins allow-plugins.cweagans/composer-patches true
-
 # Scaffold patches and settings.php.
 composer config -jm extra.drupal-scaffold.file-mapping '{
     "patches/README.md": false,
@@ -26,6 +23,4 @@ composer config scripts.post-drupal-scaffold-cmd \
     'cd web/sites/default && test -z "$(grep '\''include \$devpanel_settings;'\'' settings.php)" && patch -Np1 -r /dev/null < $APP_ROOT/.devpanel/drupal-settings.patch || :'
 
 # Add Drush and Composer Patches.
-composer require -n --no-update \
-    drush/drush \
-    cweagans/composer-patches
+composer require -n --no-update drush/drush
