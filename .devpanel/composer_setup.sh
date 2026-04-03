@@ -9,7 +9,7 @@ cd $APP_ROOT
 # Create required composer.json and composer.lock files.
 composer create-project --no-install ${PROJECT:=drupal/recommended-project}
 cp -r ${PROJECT#*/}/* ./
-rm -rf ${PROJECT#*/} LICENSE* README* patches.lock.json
+rm -rf ${PROJECT#*/}
 
 # Scaffold patches and settings.php.
 composer config -jm extra.drupal-scaffold.file-mapping '{

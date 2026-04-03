@@ -1,5 +1,5 @@
 {
-    "name": "Umami Demo",
+    "name": "Umami Demo (PHP 8.5)",
     "dockerComposeFile": "docker-compose.yml",
     "service": "app",
     "workspaceFolder": "/var/www/html",

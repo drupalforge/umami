@@ -1,14 +1,15 @@
 /.devpanel/dumps/
-/.devpanel/salt.txt
 /.editorconfig
 /.gitattributes
 /.vscode/
 /composer.json
 /composer.lock
 /config/
+/LICENSE*
 /logs/*
 /patches.lock.json
 /private/
+/README*
 /recipes/
 /vendor/
 /web/
