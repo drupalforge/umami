@@ -54,11 +54,6 @@ echo
 if [ -z "$(drush status --field=db-status)" ]; then
   echo 'Install Drupal.'
   time drush -n si demo_umami
-
-  echo
-  echo 'Tell Automatic Updates about patches.'
-  drush -n cset --input-format=yaml package_manager.settings additional_trusted_composer_plugins '["cweagans/composer-patches"]'
-  time drush ev '\Drupal::moduleHandler()->invoke("automatic_updates", "modules_installed", [[], FALSE])'
 else
   echo 'Update database.'
   time drush -n updb
